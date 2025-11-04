@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>🍽️ Planificador de Menú con Gemini (Django)</title>
+    
+    <style>
+        /* Estilos CSS básicos para la interfaz */
+        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; }
+        #chat-container { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; background-color: white; border-radius: 8px; margin-bottom: 10px; }
+        .message { margin-bottom: 10px; padding: 8px; border-radius: 5px; }
+        .user { text-align: right; background-color: #d1e7dd; }
+        .gemini { text-align: left; background-color: #f8d7da; }
+        .input-group { display: flex; }
+        input[type="text"] { padding: 10px; flex-grow: 1; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px 0 0 5px; }
+        button { padding: 10px 15px; background-color: #1a73e8; color: white; border: none; cursor: pointer; border-radius: 0 5px 5px 0; }
+        .plan-box { border: 2px dashed #1a73e8; padding: 15px; margin-top: 20px; background-color: #e6f3ff; border-radius: 8px; }
+        .plan-box h2 { margin-top: 0; color: #1a73e8; }
+    </style>
+    </head>
+<body>
+    
+    <h1>🍽️ Asistente de Menú Semanal (Django + Gemini)</h1>
+    
+    <div id="chat-container"></div>
+
+    <div class="input-group">
+        <input type="text" id="user-input" placeholder="Pregunta a Gemini. Prueba con: 'Dame un Menú Completo'">
+        <button onclick="sendMessage()">Enviar</button>
+    </div>
+
+    <div class="plan-box">
+        <h2>Plan Semanal Sugerido:</h2>
+        <div id="menu-plan">Aún no hay plan. Pide a Gemini un 'Menú Completo' o 'Menú Semanal'.</div>
+    </div>
+
+
+    <div style="text-align: center; margin-top: 30px;">
+        <button onclick="generateInspirationalImage()" style="background-color: #28a745;">Generar Imagen Inspiradora 🌟</button>
+        <div id="inspirational-image-container" style="margin-top: 20px;">
+        </div>
+    </div>
+
+    <script>
+        // Esta línea es HTML de Django que inserta el token CSRF necesario para seguridad
+        const csrftoken = '{{ csrf_token }}'; 
+        
+        // Generar un ID de sesión para mantener la conversación
+        const sessionId = 'user-' + Math.random().toString(36).substring(2, 9);
+        const chatContainer = document.getElementById('chat-container');
+        const menuPlanDiv = document.getElementById('menu-plan');
+        const inputField = document.getElementById('user-input');
+
+        // Función para añadir mensajes al contenedor de chat
+        function addMessage(sender, text) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message ' + sender;
+            msgDiv.innerHTML = sender === 'user' ? 'Tú: ' + text : 'Gemini: ' + text.replace(/\n/g, '<br>'); 
+            chatContainer.appendChild(msgDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Función principal que envía el mensaje al servidor de Django
+        async function sendMessage() {
+            const prompt = inputField.value;
+            if (!prompt) return;
+
+            addMessage('user', prompt);
+            inputField.value = '';
+
+            try {
+                // Petición POST a la URL de Django /api/chat/ (definida en semana/urls.py)
+                const response = await fetch('/api/chat/', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrftoken 
+                    },
+                    body: JSON.stringify({ prompt: prompt, session_id: sessionId })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    addMessage('gemini', 'ERROR: ' + data.error);
+                    return;
+                }
+
+                const geminiResponse = data.response;
+                
+                // Lógica que detecta si Gemini envió un menú completo (gracias a los Examples/Few-Shot)
+                if (geminiResponse.includes('* Lunes:') || geminiResponse.includes('* Martes:')) {
+                    // Actualiza el recuadro especial con el plan
+                    menuPlanDiv.innerHTML = geminiResponse.replace(/\n/g, '<br>');
+                }
+
+                addMessage('gemini', geminiResponse);
+
+            } catch (error) {
+                addMessage('gemini', 'Error de conexión con el servidor. ¿Está activo el servidor de Django?');
+            }
+        }
+
+
+        // Función para generar una imagen inspiradora
+        async function generateInspirationalImage() {
+            const imageContainer = document.getElementById('inspirational-image-container');
+            imageContainer.innerHTML = '<p>Generando imagen... por favor espera.</p>';
+
+            try {
+                const response = await fetch('/api/generate_image/', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrftoken 
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    imageContainer.innerHTML = '<p style="color: red;">Error: ' + data.error + '</p>';
+                    return;
+                }
+
+                if (data.image_data) {
+                    // Si recibimos base64, lo mostramos
+                    imageContainer.innerHTML = `<img src="data:image/jpeg;base64,${data.image_data}" alt="Imagen Inspiradora" style="max-width: 100%; height: auto; border-radius: 8px;">`;
+                } else {
+                    imageContainer.innerHTML = '<p style="color: red;">No se recibió ninguna imagen.</p>';
+                }
+
+            } catch (error) {
+                imageContainer.innerHTML = '<p style="color: red;">Error de conexión al generar imagen. ¿Está activo el servidor de Django?</p>';
+                console.error('Error generando imagen:', error);
+            }
+        }
+        
+        // Escucha la tecla Enter para enviar el mensaje
+        inputField.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Mensaje inicial
+        addMessage('gemini', '¡Hola! Soy tu asistente de menú Gemini. ¿Qué te gustaría cocinar esta semana?');
+    </script>
+    </body>
+</html>
